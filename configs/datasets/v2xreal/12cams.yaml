@@ -1,0 +1,29 @@
+# V2X-Real dataset configuration (vehicles + infrastructures), 12 cameras
+
+data:
+  data_root: data/v2x-real/processed_multicam  # output root from multi-cam converter
+  dataset: v2xreal
+  scene_idx: 0
+  start_timestep: 0
+  end_timestep: -1
+  preload_device: cpu
+  pixel_source:
+    type: datasets.nuscenes.nuscenes_sourceloader.NuScenesPixelSource
+    cameras: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    downscale_when_loading: [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]
+    downscale: 1
+    undistort: False
+    test_image_stride: 0
+    load_sky_mask: True
+    load_dynamic_mask: True
+    load_objects: True
+    load_smpl: False
+    sampler:
+      buffer_downscale: 8
+      buffer_ratio: 0.5
+      start_enhance_weight: 2
+  lidar_source:
+    type: datasets.nuscenes.nuscenes_sourceloader.NuScenesLiDARSource
+    load_lidar: True
+    lidar_downsample_factor: 4
+    lidar_percentile: 0.02

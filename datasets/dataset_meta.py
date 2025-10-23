@@ -181,4 +181,66 @@ DATASETS_CONFIG = {
             "egocar_visible": False
         },
     },
+    "v2xreal": {
+        0: {
+            "camera_name": "cam1",
+            "original_size": (1080, 1920),
+            "egocar_visible": True
+        },
+        1: {
+            "camera_name": "cam2",
+            "original_size": (1080, 1920),
+            "egocar_visible": True
+        },
+        2: {
+            "camera_name": "cam3",
+            "original_size": (1080, 1920),
+            "egocar_visible": True
+        },
+        3: {
+            "camera_name": "cam4",
+            "original_size": (1080, 1920),
+            "egocar_visible": True
+        },
+        4: {
+            "camera_name": "cam5",
+            "original_size": (1080, 1920),
+            "egocar_visible": True
+        },
+        5: {
+            "camera_name": "cam6",
+            "original_size": (1080, 1920),
+            "egocar_visible": True
+        },
+        6: {
+            "camera_name": "cam7",
+            "original_size": (1080, 1920),
+            "egocar_visible": True
+        },
+        7: {
+            "camera_name": "cam8",
+            "original_size": (1080, 1920),
+            "egocar_visible": True
+        },
+        8: {
+            "camera_name": "cam9",
+            "original_size": (1080, 1920),
+            "egocar_visible": True
+        },
+        9: {
+            "camera_name": "cam10",
+            "original_size": (1080, 1920),
+            "egocar_visible": True
+        },
+        10: {
+            "camera_name": "cam11",
+            "original_size": (1080, 1920),
+            "egocar_visible": True
+        },
+        11: {
+            "camera_name": "cam12",
+            "original_size": (1080, 1920),
+            "egocar_visible": True
+        },
+    },
 }

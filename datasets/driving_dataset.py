@@ -304,13 +304,13 @@ class DrivingDataset(SceneDataset):
                     if not o_type == ModelType.RigidNodes:
                         continue
                 
-                if exclude_smpl:
+                if exclude_smpl and cur_node_type == "DeformableNodes":
                     # objects with smpl pose will be modeled by SMPLNodes
-                    assert cur_node_type == "DeformableNodes", \
-                        "Only exclude SMPL for DeformableNodes"
-                    true_id = self.pixel_source.instances_true_id[ins_id].item()
-                    if true_id in self.pixel_source.smpl_human_all.keys():
-                        continue
+                    # Only exclude when SMPL annotations are actually loaded
+                    if hasattr(self.pixel_source, "smpl_human_all"):
+                        true_id = self.pixel_source.instances_true_id[ins_id].item()
+                        if true_id in self.pixel_source.smpl_human_all.keys():
+                            continue
 
                 if ins_id not in instance_dict:
                     instance_dict[ins_id] = {
@@ -396,6 +396,10 @@ class DrivingDataset(SceneDataset):
         return instance_dict
     
     def get_init_smpl_objects(self, only_moving: bool = False, traj_length_thres: float = 0.5):
+        # If SMPL annotations are not loaded, return empty to let trainer drop SMPLNodes gracefully
+        if not hasattr(self.pixel_source, "smpl_human_all"):
+            logger.warning("[SMPLNodes] SMPL data not loaded; skip SMPL initialization.")
+            return {}
         instance_dict = {}
         """
         instance_dict = {

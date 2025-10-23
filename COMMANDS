@@ -1,0 +1,10 @@
+export PYTHONPATH=$(pwd)
+python datasets/tools/v2xreal_to_processed_multicam.py --source_root data/v2x-real/raw --split test --scenario 2023-04-04-14-34-53_51_1 --vehicle_ids 1 2 --infra_ids -1 -2 --target_root data/v2x-real/processed_multicam --scene_idx 1 --instances_source union --expected_cams 12 --merge_vehicle_lidar --merge_lidar_max_points 200000
+
+python datasets/tools/v2xreal_generate_dynamic_masks.py --processed_scene data/v2x-real/processed_multicam/001
+
+conda activate segformer
+python datasets/tools/extract_masks.py --data_root data/v2x-real/processed_multicam --scene_ids 1 --segformer_path ./SegFormer --config ./SegFormer/local_configs/segformer/B5/segformer.b5.1024x1024.city.160k.py --checkpoint ./SegFormer/pretrained/segformer.b5.1024x1024.city.160k.pth --rgb_dirname images --mask_dirname fine_dynamic_masks --process_dynamic_mask
+
+conda activate drivestudio
+python tools/train.py --config_file configs/omnire.yaml --output_root work_dirs --project drivestudio --run_name v2x-real-test-143453 dataset=v2xreal/12cams data.data_root=data/v2x-real/processed_multicam data.scene_idx=1

@@ -34,6 +34,8 @@ def get_layout(dataset_type: str):
         layout = layout_kitti
     elif dataset_type == "nuplan":
         layout = layout_nuplan
+    elif dataset_type == "v2xreal":
+        layout = layout_v2xreal
     else:
         raise ValueError(f"dataset_type {dataset_type} not supported")
     return layout
@@ -339,6 +341,48 @@ def layout_argoverse(
     min_x, max_x = np.where(filled_mask)[1].min(), np.where(filled_mask)[1].max()
     tiled_img = tiled_img[min_y:max_y, min_x:max_x]
     return tiled_img
+
+def layout_v2xreal(
+    imgs: List[np.array], cam_names: List[str]
+) -> np.array:
+    """Generic grid tiling for V2X-Real with arbitrary camera count.
+
+    - Supports up to 12 cameras (or any N): auto-compute rows/cols.
+    - Places images row-major into a nearly-square grid (default 4 cols for N>=8).
+    - Crops the canvas to the filled bounding region.
+    """
+    channel = imgs[0].shape[-1]
+    h, w = imgs[0].shape[:2]
+    n = len(imgs)
+    # Heuristic grid: 4 columns for up to 12 cams, else sqrt-based
+    if n <= 3:
+        cols = n
+    elif n <= 8:
+        cols = 4
+    else:
+        cols = 4
+    rows = (n + cols - 1) // cols
+
+    tiled_h = h * rows
+    tiled_w = w * cols
+    tiled_img = np.zeros((tiled_h, tiled_w, channel), dtype=np.float32)
+    filled_mask = np.zeros((tiled_h, tiled_w), dtype=np.uint8)
+
+    for idx in range(n):
+        r = idx // cols
+        c = idx % cols
+        y0, y1 = r * h, (r + 1) * h
+        x0, x1 = c * w, (c + 1) * w
+        tiled_img[y0:y1, x0:x1] = imgs[idx]
+        filled_mask[y0:y1, x0:x1] = 1
+
+    # crop to filled area
+    ys, xs = np.where(filled_mask > 0)
+    if len(ys) == 0 or len(xs) == 0:
+        return tiled_img
+    min_y, max_y = ys.min(), ys.max()
+    min_x, max_x = xs.min(), xs.max()
+    return tiled_img[min_y:max_y + 1, min_x:max_x + 1]
 
 def dump_3d_bbox_on_image(
     coords, img,

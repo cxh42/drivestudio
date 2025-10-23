@@ -152,6 +152,9 @@ class DepthLoss(nn.Module):
         hit_mask: Tensor = None,
     ):
         depth_error = self._compute_depth_loss(pred_depth, gt_depth, self.upper_bound, hit_mask)
+        # Safe-guard: if no valid lidar hits in this batch, return 0 to avoid NaN
+        if depth_error.numel() == 0:
+            return pred_depth.new_tensor(0.0)
         if self.depth_error_percentile is not None:
             # to avoid outliers. not used for now
             depth_error = depth_error.flatten()
@@ -166,11 +169,15 @@ class DepthLoss(nn.Module):
         elif self.reduction == "none":
             depth_error = depth_error
         elif self.reduction == "mean_on_hit":
-            depth_error = depth_error.mean()
+            # Avoid NaN if empty after filtering
+            depth_error = depth_error.mean() if depth_error.numel() > 0 else pred_depth.new_tensor(0.0)
         elif self.reduction == "mean_on_hw":
             n = gt_depth.shape[0]*gt_depth.shape[1]
             depth_error = depth_error.sum() / n
         else:
             raise NotImplementedError(f"Unknown reduction method: {self.reduction}")
 
+        # Final safety: replace NaN/Inf with zero to avoid breaking the training loop
+        if not torch.isfinite(depth_error):
+            depth_error = pred_depth.new_tensor(0.0)
         return depth_error

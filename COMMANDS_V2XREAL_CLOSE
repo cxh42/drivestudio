@@ -1,0 +1,78 @@
+# 0) 环境
+export PYTHONPATH=$(pwd)
+
+# 1) 逐场景转换（启用 LiDAR 融合）
+python datasets/tools/v2xreal_to_processed_multicam.py --source_root data/v2x-real/raw --split validate --scenario 2023-04-04-15-43-17_15_0 --vehicle_ids 1 2 --infra_ids -1 -2 --target_root data/v2x-real/processed_multicam --scene_idx 0 --instances_source union --expected_cams 12 --merge_vehicle_lidar --merge_lidar_max_points 200000
+python datasets/tools/v2xreal_to_processed_multicam.py --source_root data/v2x-real/raw --split test     --scenario 2023-04-04-14-34-53_51_1 --vehicle_ids 1 2 --infra_ids -1 -2 --target_root data/v2x-real/processed_multicam --scene_idx 1 --instances_source union --expected_cams 12 --merge_vehicle_lidar --merge_lidar_max_points 200000
+python datasets/tools/v2xreal_to_processed_multicam.py --source_root data/v2x-real/raw --split test     --scenario 2023-04-04-14-27-53_44_0 --vehicle_ids 1 2 --infra_ids -1 -2 --target_root data/v2x-real/processed_multicam --scene_idx 2 --instances_source union --expected_cams 12 --merge_vehicle_lidar --merge_lidar_max_points 200000
+python datasets/tools/v2xreal_to_processed_multicam.py --source_root data/v2x-real/raw --split test     --scenario 2023-04-04-15-47-17_19_0 --vehicle_ids 1 2 --infra_ids -1 -2 --target_root data/v2x-real/processed_multicam --scene_idx 3 --instances_source union --expected_cams 12 --merge_vehicle_lidar --merge_lidar_max_points 200000
+
+# 2) 逐场景生成粗动态掩码
+python datasets/tools/v2xreal_generate_dynamic_masks.py --processed_scene data/v2x-real/processed_multicam/000
+python datasets/tools/v2xreal_generate_dynamic_masks.py --processed_scene data/v2x-real/processed_multicam/001
+python datasets/tools/v2xreal_generate_dynamic_masks.py --processed_scene data/v2x-real/processed_multicam/002
+python datasets/tools/v2xreal_generate_dynamic_masks.py --processed_scene data/v2x-real/processed_multicam/003
+
+# 3) 逐场景细化掩码（SegFormer）
+conda activate segformer
+python datasets/tools/extract_masks.py --data_root data/v2x-real/processed_multicam --scene_ids 0 --segformer_path ./SegFormer --config ./SegFormer/local_configs/segformer/B5/segformer.b5.1024x1024.city.160k.py --checkpoint ./SegFormer/pretrained/segformer.b5.1024x1024.city.160k.pth --rgb_dirname images --mask_dirname fine_dynamic_masks --process_dynamic_mask
+python datasets/tools/extract_masks.py --data_root data/v2x-real/processed_multicam --scene_ids 1 --segformer_path ./SegFormer --config ./SegFormer/local_configs/segformer/B5/segformer.b5.1024x1024.city.160k.py --checkpoint ./SegFormer/pretrained/segformer.b5.1024x1024.city.160k.pth --rgb_dirname images --mask_dirname fine_dynamic_masks --process_dynamic_mask
+python datasets/tools/extract_masks.py --data_root data/v2x-real/processed_multicam --scene_ids 2 --segformer_path ./SegFormer --config ./SegFormer/local_configs/segformer/B5/segformer.b5.1024x1024.city.160k.py --checkpoint ./SegFormer/pretrained/segformer.b5.1024x1024.city.160k.pth --rgb_dirname images --mask_dirname fine_dynamic_masks --process_dynamic_mask
+python datasets/tools/extract_masks.py --data_root data/v2x-real/processed_multicam --scene_ids 3 --segformer_path ./SegFormer --config ./SegFormer/local_configs/segformer/B5/segformer.b5.1024x1024.city.160k.py --checkpoint ./SegFormer/pretrained/segformer.b5.1024x1024.city.160k.pth --rgb_dirname images --mask_dirname fine_dynamic_masks --process_dynamic_mask
+conda activate drivestudio
+
+# 4) 逐场景训练（12相机配置；若某场景不是12相机，请改 cameras 列表）
+python tools/train.py --config_file configs/omnire.yaml --output_root work_dirs --project drivestudio --run_name v2x-real-validate-154317 dataset=v2xreal/12cams data.data_root=data/v2x-real/processed_multicam data.scene_idx=0
+python tools/train.py --config_file configs/omnire.yaml --output_root work_dirs --project drivestudio --run_name v2x-real-test-143453     dataset=v2xreal/12cams data.data_root=data/v2x-real/processed_multicam data.scene_idx=1
+python tools/train.py --config_file configs/omnire.yaml --output_root work_dirs --project drivestudio --run_name v2x-real-test-142753     dataset=v2xreal/12cams data.data_root=data/v2x-real/processed_multicam data.scene_idx=2
+python tools/train.py --config_file configs/omnire.yaml --output_root work_dirs --project drivestudio --run_name v2x-real-test-154717     dataset=v2xreal/12cams data.data_root=data/v2x-real/processed_multicam data.scene_idx=3
+
+# 5) 追加场景（004 ~ 009）：两车距离近，且四个agent齐全（12相机）
+
+# 004: test/2023-04-03-18-28-32_22_0（min_d≈10.83m）
+python datasets/tools/v2xreal_to_processed_multicam.py --source_root data/v2x-real/raw --split test     --scenario 2023-04-03-18-28-32_22_0 --vehicle_ids 1 2 --infra_ids -1 -2 --target_root data/v2x-real/processed_multicam --scene_idx 4 --instances_source union --expected_cams 12 --merge_vehicle_lidar --merge_lidar_max_points 200000
+python datasets/tools/v2xreal_generate_dynamic_masks.py --processed_scene data/v2x-real/processed_multicam/004
+conda activate segformer
+python datasets/tools/extract_masks.py --data_root data/v2x-real/processed_multicam --scene_ids 4 --segformer_path ./SegFormer --config ./SegFormer/local_configs/segformer/B5/segformer.b5.1024x1024.city.160k.py --checkpoint ./SegFormer/pretrained/segformer.b5.1024x1024.city.160k.pth --rgb_dirname images --mask_dirname fine_dynamic_masks --process_dynamic_mask
+conda activate drivestudio
+python tools/train.py --config_file configs/omnire.yaml --output_root work_dirs --project drivestudio --run_name v2x-real-test-182832     dataset=v2xreal/12cams data.data_root=data/v2x-real/processed_multicam data.scene_idx=4
+
+# 005: test/2023-03-17-16-12-12_3_0（min_d≈18.11m）
+python datasets/tools/v2xreal_to_processed_multicam.py --source_root data/v2x-real/raw --split test     --scenario 2023-03-17-16-12-12_3_0 --vehicle_ids 1 2 --infra_ids -1 -2 --target_root data/v2x-real/processed_multicam --scene_idx 5 --instances_source union --expected_cams 12 --merge_vehicle_lidar --merge_lidar_max_points 200000
+python datasets/tools/v2xreal_generate_dynamic_masks.py --processed_scene data/v2x-real/processed_multicam/005
+conda activate segformer
+python datasets/tools/extract_masks.py --data_root data/v2x-real/processed_multicam --scene_ids 5 --segformer_path ./SegFormer --config ./SegFormer/local_configs/segformer/B5/segformer.b5.1024x1024.city.160k.py --checkpoint ./SegFormer/pretrained/segformer.b5.1024x1024.city.160k.pth --rgb_dirname images --mask_dirname fine_dynamic_masks --process_dynamic_mask
+conda activate drivestudio
+python tools/train.py --config_file configs/omnire.yaml --output_root work_dirs --project drivestudio --run_name v2x-real-test-161212     dataset=v2xreal/12cams data.data_root=data/v2x-real/processed_multicam data.scene_idx=5
+
+# 006: validate/2023-03-17-16-10-12_1_1（min_d≈18.72m）
+python datasets/tools/v2xreal_to_processed_multicam.py --source_root data/v2x-real/raw --split validate --scenario 2023-03-17-16-10-12_1_1 --vehicle_ids 1 2 --infra_ids -1 -2 --target_root data/v2x-real/processed_multicam --scene_idx 6 --instances_source union --expected_cams 12 --merge_vehicle_lidar --merge_lidar_max_points 200000
+python datasets/tools/v2xreal_generate_dynamic_masks.py --processed_scene data/v2x-real/processed_multicam/006
+conda activate segformer
+python datasets/tools/extract_masks.py --data_root data/v2x-real/processed_multicam --scene_ids 6 --segformer_path ./SegFormer --config ./SegFormer/local_configs/segformer/B5/segformer.b5.1024x1024.city.160k.py --checkpoint ./SegFormer/pretrained/segformer.b5.1024x1024.city.160k.pth --rgb_dirname images --mask_dirname fine_dynamic_masks --process_dynamic_mask
+conda activate drivestudio
+python tools/train.py --config_file configs/omnire.yaml --output_root work_dirs --project drivestudio --run_name v2x-real-validate-161012  dataset=v2xreal/12cams data.data_root=data/v2x-real/processed_multicam data.scene_idx=6
+
+# 007: validate/2023-04-04-16-01-17_33_0（min_d≈23.35m）
+python datasets/tools/v2xreal_to_processed_multicam.py --source_root data/v2x-real/raw --split validate --scenario 2023-04-04-16-01-17_33_0 --vehicle_ids 1 2 --infra_ids -1 -2 --target_root data/v2x-real/processed_multicam --scene_idx 7 --instances_source union --expected_cams 12 --merge_vehicle_lidar --merge_lidar_max_points 200000
+python datasets/tools/v2xreal_generate_dynamic_masks.py --processed_scene data/v2x-real/processed_multicam/007
+conda activate segformer
+python datasets/tools/extract_masks.py --data_root data/v2x-real/processed_multicam --scene_ids 7 --segformer_path ./SegFormer --config ./SegFormer/local_configs/segformer/B5/segformer.b5.1024x1024.city.160k.py --checkpoint ./SegFormer/pretrained/segformer.b5.1024x1024.city.160k.pth --rgb_dirname images --mask_dirname fine_dynamic_masks --process_dynamic_mask
+conda activate drivestudio
+python tools/train.py --config_file configs/omnire.yaml --output_root work_dirs --project drivestudio --run_name v2x-real-validate-160117  dataset=v2xreal/12cams data.data_root=data/v2x-real/processed_multicam data.scene_idx=7
+
+# 008: test/2023-04-05-16-31-26_28_1（min_d≈27.54m）
+python datasets/tools/v2xreal_to_processed_multicam.py --source_root data/v2x-real/raw --split test     --scenario 2023-04-05-16-31-26_28_1 --vehicle_ids 1 2 --infra_ids -1 -2 --target_root data/v2x-real/processed_multicam --scene_idx 8 --instances_source union --expected_cams 12 --merge_vehicle_lidar --merge_lidar_max_points 200000
+python datasets/tools/v2xreal_generate_dynamic_masks.py --processed_scene data/v2x-real/processed_multicam/008
+conda activate segformer
+python datasets/tools/extract_masks.py --data_root data/v2x-real/processed_multicam --scene_ids 8 --segformer_path ./SegFormer --config ./SegFormer/local_configs/segformer/B5/segformer.b5.1024x1024.city.160k.py --checkpoint ./SegFormer/pretrained/segformer.b5.1024x1024.city.160k.pth --rgb_dirname images --mask_dirname fine_dynamic_masks --process_dynamic_mask
+conda activate drivestudio
+python tools/train.py --config_file configs/omnire.yaml --output_root work_dirs --project drivestudio --run_name v2x-real-test-163126     dataset=v2xreal/12cams data.data_root=data/v2x-real/processed_multicam data.scene_idx=8
+
+# 009: test/2023-04-03-18-19-32_13_0（min_d≈43.34m）
+python datasets/tools/v2xreal_to_processed_multicam.py --source_root data/v2x-real/raw --split test     --scenario 2023-04-03-18-19-32_13_0 --vehicle_ids 1 2 --infra_ids -1 -2 --target_root data/v2x-real/processed_multicam --scene_idx 9 --instances_source union --expected_cams 12 --merge_vehicle_lidar --merge_lidar_max_points 200000
+python datasets/tools/v2xreal_generate_dynamic_masks.py --processed_scene data/v2x-real/processed_multicam/009
+conda activate segformer
+python datasets/tools/extract_masks.py --data_root data/v2x-real/processed_multicam --scene_ids 9 --segformer_path ./SegFormer --config ./SegFormer/local_configs/segformer/B5/segformer.b5.1024x1024.city.160k.py --checkpoint ./SegFormer/pretrained/segformer.b5.1024x1024.city.160k.pth --rgb_dirname images --mask_dirname fine_dynamic_masks --process_dynamic_mask
+conda activate drivestudio
+python tools/train.py --config_file configs/omnire.yaml --output_root work_dirs --project drivestudio --run_name v2x-real-test-181932     dataset=v2xreal/12cams data.data_root=data/v2x-real/processed_multicam data.scene_idx=9
