@@ -202,14 +202,14 @@ def run_4DHumans(
     assert os.path.exists(images_dir), f"Images directory {images_dir} does not exist"
     temp_dir = os.path.join(scene_dir, 'humanpose', 'temp')
     
-    # create a flag to check if the results already exist
-    already_done = False
+    # track which cameras already have results
+    done_map = {}
 
     for cam_id in camera_list:
         results_path = os.path.join(temp_dir, 'phalp_output', f'cam_{cam_id}.pkl')
         if os.path.exists(results_path):
             logger.info(f"Results for camera {cam_id} already exists at {results_path}")
-            already_done = True
+            done_map[cam_id] = True
             continue
         
         cfg = initialize_config()
@@ -239,6 +239,15 @@ def run_4DHumans(
         phalp_tracker = HMR2_4dhuman(cfg)
         phalp_tracker.track()
         
+        # move and rename saved pickle files immediately for this camera
+        try:
+            idx_in_loop = i  # index from enumerate(camera_list)
+            demo_path = os.path.join(temp_dir, 'phalp_output', 'results', f'demo_{idx_in_loop}.pkl')
+            if os.path.exists(demo_path):
+                os.makedirs(os.path.join(temp_dir, 'phalp_output'), exist_ok=True)
+                os.rename(demo_path, os.path.join(temp_dir, 'phalp_output', f'cam_{cam_id}.pkl'))
+        except Exception:
+            pass
         # reset global hydra
         GlobalHydra.instance().clear()
     
@@ -266,23 +275,20 @@ def run_4DHumans(
     
     # load those pickle files to return
     pred_tracks_allcam = {}
+    # Prefer loading consolidated per-cam files; fall back to demo_* if present
     for i, cam_id in enumerate(camera_list):
-        if already_done:
-            pred_tracks_allcam[cam_id] = joblib.load(
-                os.path.join(temp_dir, 'phalp_output', f'cam_{cam_id}.pkl')
-            )
+        cam_pkl = os.path.join(temp_dir, 'phalp_output', f'cam_{cam_id}.pkl')
+        if os.path.exists(cam_pkl):
+            pred_tracks_allcam[cam_id] = joblib.load(cam_pkl)
         else:
-            pred_tracks_allcam[cam_id] = joblib.load(
-                os.path.join(temp_dir, 'phalp_output', 'results', f'demo_{i}.pkl')
-            )
-    
-    # move and rename saved pickle files if save_temp
-    if save_temp and not already_done:
-        for i, cam_id in enumerate(camera_list):
-            os.rename(
-                os.path.join(temp_dir, 'phalp_output', 'results', f'demo_{i}.pkl'),
-                os.path.join(temp_dir, 'phalp_output', f'cam_{cam_id}.pkl')
-            )
+            demo_pkl = os.path.join(temp_dir, 'phalp_output', 'results', f'demo_{i}.pkl')
+            pred_tracks_allcam[cam_id] = joblib.load(demo_pkl)
+            # Consolidate for future runs
+            try:
+                os.rename(demo_pkl, cam_pkl)
+            except Exception:
+                pass
+    # cleanup demo folder if empty
     os.system(f"rm -rf {os.path.join(temp_dir, 'phalp_output', 'results')}")
     
     return pred_tracks_allcam

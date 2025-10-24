@@ -279,14 +279,14 @@ class NuScenesPixelSource(ScenePixelSource):
         self.instances_model_types = instances_model_types
 
         if self.data_cfg.load_smpl:
-            # Collect camera-to-world matrices for all available cameras
+            # Collect camera-to-world matrices for all configured cameras
             cam_to_worlds = {}
-            for cam_id in AVAILABLE_CAM_LIST:
+            for cam_id in self.camera_list:
                 cam_to_worlds[cam_id] = NuScenesCameraData.get_camera2worlds(
-                    self.data_path, 
-                    str(cam_id), 
-                    self.start_timestep, 
-                    self.end_timestep
+                    self.data_path,
+                    str(cam_id),
+                    self.start_timestep,
+                    self.end_timestep,
                 )
 
             # load SMPL parameters
@@ -318,7 +318,16 @@ class NuScenesPixelSource(ScenePixelSource):
                             torch.cat([world_orient[None, ...], body_pose], dim=0)
                         )
                         
-                        ii = instances_info[str(instance_id)]['frame_annotations']["frame_idx"].index(fi)
+                        # Find the object pose at frame fi; fall back to nearest frame if absent
+                        frame_idx_list = instances_info[str(instance_id)]['frame_annotations']["frame_idx"]
+                        try:
+                            ii = frame_idx_list.index(fi)
+                        except ValueError:
+                            # choose nearest annotated frame to avoid crash on sparse frames
+                            if len(frame_idx_list) == 0:
+                                continue
+                            nearest = min(frame_idx_list, key=lambda x: abs(x - fi))
+                            ii = frame_idx_list.index(nearest)
                         o2w = np.array(
                             instances_info[str(instance_id)]['frame_annotations']["obj_to_world"][ii]
                         )

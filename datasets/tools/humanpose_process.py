@@ -93,6 +93,12 @@ if __name__ == "__main__":
         default=12,
         help="FPS for the visualization video if verbose is True",
     )
+    parser.add_argument(
+        "--max_cams",
+        type=int,
+        default=None,
+        help="Limit number of cameras to process (e.g., 8 for v2xreal)",
+    )
     args = parser.parse_args()
     
     if args.dataset == "waymo":
@@ -107,8 +113,12 @@ if __name__ == "__main__":
         from datasets.kitti.kitti_human_utils import project_human_boxes, CAMERA_LIST
     elif args.dataset == "nuplan":
         from datasets.nuplan.nuplan_human_utils import project_human_boxes, CAMERA_LIST
+    elif args.dataset == "v2xreal":
+        from datasets.v2xreal.v2xreal_human_utils import project_human_boxes, CAMERA_LIST
     else:
-        raise ValueError(f"Unknown dataset {args.dataset}, please choose from waymo, pandaset, argoverse, nuscenes, kitti, nuplan")
+        raise ValueError(
+            f"Unknown dataset {args.dataset}, please choose from waymo, pandaset, argoverse, nuscenes, kitti, nuplan, v2xreal"
+        )
     
     if args.scene_ids is not None:
         scene_ids_list = args.scene_ids
@@ -127,10 +137,29 @@ if __name__ == "__main__":
     for scene_id in scene_ids_list:
         try:
             scene_dir = f'{args.data_root}/{str(scene_id).zfill(3)}'
+            # For v2xreal, infer available cameras from intrinsics per scene
+            cam_list = CAMERA_LIST
+            if args.dataset == "v2xreal":
+                intr_dir = os.path.join(scene_dir, "intrinsics")
+                if os.path.isdir(intr_dir):
+                    try:
+                        cam_list = sorted(
+                            [
+                                int(os.path.splitext(f)[0])
+                                for f in os.listdir(intr_dir)
+                                if f.endswith(".txt") and os.path.splitext(f)[0].isdigit()
+                            ]
+                        )
+                    except Exception:
+                        pass
+            # Optionally limit camera count (e.g., for v2xreal OOM mitigation)
+            if args.max_cams is not None:
+                cam_list = cam_list[: args.max_cams]
+
             extract_humanpose(
                 scene_dir=scene_dir,
                 projection_fn=project_human_boxes,
-                camera_list=CAMERA_LIST,
+                camera_list=cam_list,
                 save_temp=args.save_temp,
                 verbose=args.verbose,
                 fps=args.fps

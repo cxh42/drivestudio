@@ -121,7 +121,8 @@ def map_class(obj_type: str) -> str:
 def main():
     ap = argparse.ArgumentParser(description='Convert a V2X-Real scenario to a single multi-camera processed scene (vehicles + infrastructures)')
     ap.add_argument('--source_root', default='data/v2x-real/raw')
-    ap.add_argument('--split', default='validate', choices=['train', 'validate', 'test'])
+    # Accept extended splits sometimes used in V2X-Real dumps
+    ap.add_argument('--split', default='validate', choices=['train', 'validate', 'test', 'train1', 'train4'])
     ap.add_argument('--scenario', required=True, help='Scenario folder name under split')
     ap.add_argument('--vehicle_id', default=None, help='[Deprecated] Single vehicle agent id (e.g., 1); use --vehicle_ids instead')
     ap.add_argument('--vehicle_ids', default=None, nargs='+', help='One or more vehicle agent folder names, e.g., 1 2')

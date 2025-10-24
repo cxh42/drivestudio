@@ -17,11 +17,11 @@ data:
     load_sky_mask: True
     load_dynamic_mask: True
     load_objects: True
-    load_smpl: False
+    load_smpl: True
     sampler:
       buffer_downscale: 8
       buffer_ratio: 0.5
-      start_enhance_weight: 2
+      start_enhance_weight: 3
   lidar_source:
     type: datasets.nuscenes.nuscenes_sourceloader.NuScenesLiDARSource
     load_lidar: True
