@@ -2,7 +2,10 @@ from omegaconf import OmegaConf
 import numpy as np
 import os
 import time
-import wandb
+try:
+    import wandb
+except Exception:
+    wandb = None
 import random
 import imageio
 import logging

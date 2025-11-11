@@ -3,7 +3,10 @@ from omegaconf import OmegaConf
 import os
 import time
 import json
-import wandb
+try:
+    import wandb
+except Exception:
+    wandb = None
 import logging
 import argparse
 

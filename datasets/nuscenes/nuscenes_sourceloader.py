@@ -278,6 +278,91 @@ class NuScenesPixelSource(ScenePixelSource):
         # (num_instances)
         self.instances_model_types = instances_model_types
 
+        # Optional: load SMPL for humans if available
+        if self.data_cfg.load_smpl:
+            try:
+                import joblib
+                from tqdm import tqdm
+                from pytorch3d.transforms import matrix_to_quaternion
+            except Exception as e:
+                logger.warning(f"[SMPLNodes] Missing deps for SMPL loading: {e}; skip SMPL.")
+                return
+
+            # Collect camera-to-world matrices for all configured cameras
+            cam_to_worlds = {}
+            for cam_id in self.camera_list:
+                try:
+                    cam_to_worlds[cam_id] = NuScenesCameraData.get_camera2worlds(
+                        self.data_path,
+                        str(cam_id),
+                        self.start_timestep,
+                        self.end_timestep,
+                    )
+                except Exception:
+                    # Skip missing cams in this scene
+                    continue
+
+            smpl_pkl = os.path.join(self.data_path, "humanpose", "smpl.pkl")
+            if not os.path.exists(smpl_pkl):
+                logger.warning(f"[SMPLNodes] {smpl_pkl} not found; skip SMPL for this scene.")
+                return
+
+            smpl_dict = joblib.load(smpl_pkl)
+            frame_num = self.end_timestep - self.start_timestep
+
+            smpl_human_all = {}
+            for fi in tqdm(range(self.start_timestep, self.end_timestep), desc="Loading SMPL"):
+                for instance_id, ins_smpl in smpl_dict.items():
+                    if instance_id not in smpl_human_all:
+                        smpl_human_all[instance_id] = {
+                            "smpl_quats": torch.zeros((frame_num, 24, 4), dtype=torch.float32),
+                            "smpl_trans": torch.zeros((frame_num, 3), dtype=torch.float32),
+                            "smpl_betas": torch.zeros((frame_num, 10), dtype=torch.float32),
+                            "frame_valid": torch.zeros((frame_num), dtype=torch.bool),
+                        }
+                        smpl_human_all[instance_id]["smpl_quats"][:, :, 0] = 1.0
+
+                    # ins_smpl["valid_mask"] is indexed by original frame idx
+                    if ins_smpl.get("valid_mask", [False] * (self.end_timestep + 1))[fi]:
+                        # Betas
+                        betas = ins_smpl["smpl"]["betas"][fi]
+                        smpl_human_all[instance_id]["smpl_betas"][fi - self.start_timestep] = betas
+
+                        # Global orient in world, append body poses then convert to quaternion
+                        body_pose = ins_smpl["smpl"]["body_pose"][fi]
+                        smpl_orient = ins_smpl["smpl"]["global_orient"][fi]
+                        cam_depend = int(ins_smpl["selected_cam_idx"][fi]) if "selected_cam_idx" in ins_smpl else 0
+                        if cam_depend in cam_to_worlds:
+                            c2w = cam_to_worlds[cam_depend][fi - self.start_timestep]
+                        else:
+                            # fallback to front cam if selected not available
+                            c2w = cam_to_worlds.get(0, torch.eye(4))
+                        world_orient = c2w[:3, :3].to(smpl_orient.device) @ smpl_orient.squeeze()
+                        smpl_quats = matrix_to_quaternion(
+                            torch.cat([world_orient[None, ...], body_pose], dim=0)
+                        )
+
+                        # Translation = object center from instances_info at this frame
+                        try:
+                            ii = instances_info[str(instance_id)]["frame_annotations"]["frame_idx"].index(fi)
+                            o2w = np.array(
+                                instances_info[str(instance_id)]["frame_annotations"]["obj_to_world"][ii]
+                            )
+                            # align coordinates the same way as camera poses (first front camera)
+                            o2w = np.linalg.inv(camera_front_start) @ o2w
+                            o2w = torch.from_numpy(o2w).float()
+                            trans = o2w[:3, 3]
+                        except Exception:
+                            # If not found, skip this frame
+                            continue
+
+                        smpl_human_all[instance_id]["smpl_quats"][fi - self.start_timestep] = smpl_quats
+                        smpl_human_all[instance_id]["smpl_trans"][fi - self.start_timestep] = trans
+                        smpl_human_all[instance_id]["frame_valid"][fi - self.start_timestep] = True
+
+            # Attach to pixel source for downstream SMPLNodes init
+            self.smpl_human_all = smpl_human_all
+
         if self.data_cfg.load_smpl:
             # Collect camera-to-world matrices for all configured cameras
             cam_to_worlds = {}

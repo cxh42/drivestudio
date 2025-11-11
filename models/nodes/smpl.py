@@ -240,6 +240,10 @@ class SMPLNodes(RigidNodes):
             )
             masked_theta = theta[instance_mask]
         masked_theta = self.quat_act(masked_theta)
+        masked_theta = torch.nan_to_num(masked_theta, nan=0.0, posinf=0.0, neginf=0.0)
+        nrm = masked_theta.norm(dim=-1, keepdim=True)
+        idq = torch.zeros_like(masked_theta); idq[...,0] = 1.0
+        masked_theta = torch.where(nrm > 1e-8, masked_theta, idq)
         W, A = self.template(
             masked_theta = masked_theta, 
             instances_mask = instance_mask,
@@ -277,6 +281,7 @@ class SMPLNodes(RigidNodes):
             )
         else:
             trans_cur_frame = self.instances_trans[self.cur_frame] # (num_instances, 3)
+        trans_cur_frame = torch.nan_to_num(trans_cur_frame, nan=0.0, posinf=0.0, neginf=0.0)
         trans_per_pts = trans_cur_frame[self.point_ids[..., 0]]
         
         # transform the means to world space
@@ -309,6 +314,10 @@ class SMPLNodes(RigidNodes):
             )
             masked_theta = theta[instance_mask]
         masked_theta = self.quat_act(masked_theta)
+        masked_theta = torch.nan_to_num(masked_theta, nan=0.0, posinf=0.0, neginf=0.0)
+        nrm = masked_theta.norm(dim=-1, keepdim=True)
+        idq = torch.zeros_like(masked_theta); idq[...,0] = 1.0
+        masked_theta = torch.where(nrm > 1e-8, masked_theta, idq)
         W, A = self.template(
             masked_theta = masked_theta, 
             instances_mask = instance_mask,
@@ -341,6 +350,7 @@ class SMPLNodes(RigidNodes):
             )
         else:
             trans_cur_frame = self.instances_trans[self.cur_frame] # (num_instances, 3)
+        trans_cur_frame = torch.nan_to_num(trans_cur_frame, nan=0.0, posinf=0.0, neginf=0.0)
         trans_per_pts = trans_cur_frame[self.point_ids[..., 0]]
         
         # transform the means to world space
@@ -373,12 +383,16 @@ class SMPLNodes(RigidNodes):
             world_quats = self._quats
         else:
             world_means, world_quats = self.transform_means_and_quats(self._means, self._quats)
+        world_means = torch.nan_to_num(world_means, nan=0.0, posinf=0.0, neginf=0.0)
+        world_quats = torch.nan_to_num(world_quats, nan=0.0, posinf=0.0, neginf=0.0)
         
         # get colors of gaussians
         colors = torch.cat((self._features_dc[:, None, :], self._features_rest), dim=1)
         if self.sh_degree > 0:
             viewdirs = world_means.detach() - cam.camtoworlds.data[..., :3, 3]  # (N, 3)
-            viewdirs = viewdirs / viewdirs.norm(dim=-1, keepdim=True)
+            vnorm = viewdirs.norm(dim=-1, keepdim=True)
+            vnorm = torch.where(vnorm > 1e-8, vnorm, torch.full_like(vnorm, 1e-8))
+            viewdirs = viewdirs / vnorm
             n = min(self.step // self.ctrl_cfg.sh_degree_interval, self.sh_degree)
             rgbs = spherical_harmonics(n, viewdirs, colors)
             rgbs = torch.clamp(rgbs + 0.5, 0.0, 1.0)

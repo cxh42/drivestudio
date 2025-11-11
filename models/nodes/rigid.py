@@ -357,9 +357,16 @@ class RigidNodes(VanillaGaussians):
                 )
             else:
                 quats_cur_frame = self.instances_quats[self.cur_frame] # (num_instances, 4)
-        rot_cur_frame = quat_to_rotmat(
-            self.quat_act(quats_cur_frame)
-        )                                                          # (num_instances, 3, 3)
+        # sanitize quaternions to avoid NaNs in rotation matrices
+        q_normed = self.quat_act(quats_cur_frame)
+        # replace non-finite values
+        q_normed = torch.nan_to_num(q_normed, nan=0.0, posinf=0.0, neginf=0.0)
+        # fallback to identity where degenerate
+        q_norm2 = q_normed.norm(dim=-1, keepdim=True)
+        id_quat = torch.tensor([1.0, 0.0, 0.0, 0.0], device=q_normed.device, dtype=q_normed.dtype).view(1, 4)
+        id_quat = id_quat.expand_as(q_normed)
+        q_normed = torch.where(q_norm2 > 1e-8, q_normed, id_quat)
+        rot_cur_frame = quat_to_rotmat(q_normed)                    # (num_instances, 3, 3)
         rot_per_pts = rot_cur_frame[self.point_ids[..., 0]]        # (num_points, 3, 3)
         
         if self._interp_info is not None:
@@ -382,6 +389,8 @@ class RigidNodes(VanillaGaussians):
                 )
             else:
                 trans_cur_frame = self.instances_trans[self.cur_frame] # (num_instances, 3)
+        # sanitize translations
+        trans_cur_frame = torch.nan_to_num(trans_cur_frame, nan=0.0, posinf=0.0, neginf=0.0)
         trans_per_pts = trans_cur_frame[self.point_ids[..., 0]]
         
         # transform the means to world space
@@ -404,8 +413,17 @@ class RigidNodes(VanillaGaussians):
             global_quats_cur_frame = self.instances_quats[self.cur_frame]
         global_quats_per_pts = global_quats_cur_frame[self.point_ids[..., 0]]
             
+        # sanitize and normalize
         global_quats_per_pts = self.quat_act(global_quats_per_pts)
+        global_quats_per_pts = torch.nan_to_num(global_quats_per_pts, nan=0.0, posinf=0.0, neginf=0.0)
+        gnorm = global_quats_per_pts.norm(dim=-1, keepdim=True)
+        global_quats_per_pts = torch.where(gnorm > 1e-8, global_quats_per_pts,
+                                           torch.tensor([1.0,0.0,0.0,0.0], device=global_quats_per_pts.device, dtype=global_quats_per_pts.dtype).view(1,4).expand_as(global_quats_per_pts))
         _quats = self.quat_act(quats)
+        _quats = torch.nan_to_num(_quats, nan=0.0, posinf=0.0, neginf=0.0)
+        qn = _quats.norm(dim=-1, keepdim=True)
+        _quats = torch.where(qn > 1e-8, _quats,
+                             torch.tensor([1.0,0.0,0.0,0.0], device=_quats.device, dtype=_quats.dtype).view(1,4).expand_as(_quats))
         return quat_mult(global_quats_per_pts, _quats)
 
     def get_gaussians(self, cam: dataclass_camera) -> Dict[str, torch.Tensor]:
@@ -414,13 +432,17 @@ class RigidNodes(VanillaGaussians):
         # NOTE: hack here, need to consider a gaussian filter for efficient rendering
         
         world_means = self.transform_means(self._means)
+        world_means = torch.nan_to_num(world_means, nan=0.0, posinf=0.0, neginf=0.0)
         world_quats = self.transform_quats(self._quats)
+        world_quats = torch.nan_to_num(world_quats, nan=0.0, posinf=0.0, neginf=0.0)
         
         # get colors of gaussians
         colors = torch.cat((self._features_dc[:, None, :], self._features_rest), dim=1)
         if self.sh_degree > 0:
             viewdirs = world_means.detach() - cam.camtoworlds.data[..., :3, 3]  # (N, 3)
-            viewdirs = viewdirs / viewdirs.norm(dim=-1, keepdim=True)
+            vnorm = viewdirs.norm(dim=-1, keepdim=True)
+            vnorm = torch.where(vnorm > 1e-8, vnorm, torch.full_like(vnorm, 1e-8))
+            viewdirs = viewdirs / vnorm
             n = min(self.step // self.ctrl_cfg.sh_degree_interval, self.sh_degree)
             rgbs = spherical_harmonics(n, viewdirs, colors)
             rgbs = torch.clamp(rgbs + 0.5, 0.0, 1.0)

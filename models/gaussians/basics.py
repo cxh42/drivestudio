@@ -15,34 +15,41 @@ from gsplat.cuda_legacy._torch_impl import quat_to_rotmat
 from gsplat.cuda._wrapper import spherical_harmonics
 
 def interpolate_quats(q1, q2, fraction=0.5):
-    q1 = q1 / torch.norm(q1, dim=-1, keepdim=True)
-    q2 = q2 / torch.norm(q2, dim=-1, keepdim=True)
-    
-    dot = (q1 * q2).sum(dim=-1)
-    dot = torch.clamp(dot, -1, 1)
-    
-    neg_mask = dot < 0
-    q2[neg_mask] = -q2[neg_mask]
-    dot[neg_mask] = -dot[neg_mask]
-    
+    """Numerically stable, autograd-friendly quaternion slerp.
+
+    Avoids in-place index updates (IndexPutBackward) by using torch.where.
+    q1, q2: (..., 4)
+    fraction: scalar or tensor broadcastable to (...,)
+    """
+    q1n = q1 / torch.norm(q1, dim=-1, keepdim=True)
+    q2n = q2 / torch.norm(q2, dim=-1, keepdim=True)
+
+    dot = torch.clamp((q1n * q2n).sum(dim=-1), -1.0, 1.0)
+    # Ensure shortest path: if dot<0, negate q2 and flip dot
+    sign = torch.where(dot < 0, torch.tensor(-1.0, device=dot.device, dtype=dot.dtype), torch.tensor(1.0, device=dot.device, dtype=dot.dtype))
+    q2n = q2n * sign.unsqueeze(-1)
+    dot = dot * sign
+
     similar_mask = dot > 0.9995
-    q_interp_similar = q1 + fraction * (q2 - q1)
+    q_interp_similar = q1n + fraction * (q2n - q1n)
 
     theta_0 = torch.acos(dot)
     theta = theta_0 * fraction
-    
+
     sin_theta = torch.sin(theta)
     sin_theta_0 = torch.sin(theta_0)
-    
+    # Avoid division by zero by replacing 0 with tiny epsilon (broadcast-safe)
+    sin_theta_0 = torch.where(sin_theta_0.abs() < 1e-8, torch.full_like(sin_theta_0, 1e-8), sin_theta_0)
+
     s1 = torch.cos(theta) - dot * sin_theta / sin_theta_0
     s2 = sin_theta / sin_theta_0
-    
-    q_interp = (s1[..., None] * q1) + (s2[..., None] * q2)
-    
-    final_q_interp = torch.zeros_like(q1)
-    final_q_interp[similar_mask] = q_interp_similar[similar_mask]
-    final_q_interp[~similar_mask] = q_interp[~similar_mask]
-    return final_q_interp
+
+    q_interp = (s1.unsqueeze(-1) * q1n) + (s2.unsqueeze(-1) * q2n)
+
+    # Select linear vs slerp branches without in-place writes
+    similar_mask_exp = similar_mask.unsqueeze(-1)
+    final_q = torch.where(similar_mask_exp, q_interp_similar, q_interp)
+    return final_q
 
 def random_quat_tensor(N):
     """

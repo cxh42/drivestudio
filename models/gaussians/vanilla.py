@@ -143,7 +143,11 @@ class VanillaGaussians(nn.Module):
         return self.quat_act(self._quats)
     
     def quat_act(self, x: torch.Tensor) -> torch.Tensor:
-        return x / x.norm(dim=-1, keepdim=True)
+        """Normalize quaternions safely with epsilon to avoid NaNs."""
+        norm = x.norm(dim=-1, keepdim=True)
+        eps = torch.finfo(x.dtype).eps if x.is_floating_point() else 1e-8
+        norm = torch.where(norm > eps, norm, torch.full_like(norm, eps))
+        return x / norm
     
     def preprocess_per_train_step(self, step: int):
         self.step = step
@@ -383,7 +387,9 @@ class VanillaGaussians(nn.Module):
         colors = torch.cat((self._features_dc[:, None, :], self._features_rest), dim=1)
         if self.sh_degree > 0:
             viewdirs = self._means.detach() - cam.camtoworlds.data[..., :3, 3]  # (N, 3)
-            viewdirs = viewdirs / viewdirs.norm(dim=-1, keepdim=True)
+            vnorm = viewdirs.norm(dim=-1, keepdim=True)
+            vnorm = torch.where(vnorm > 1e-8, vnorm, torch.full_like(vnorm, 1e-8))
+            viewdirs = viewdirs / vnorm
             n = min(self.step // self.ctrl_cfg.sh_degree_interval, self.sh_degree)
             rgbs = spherical_harmonics(n, viewdirs, colors)
             rgbs = torch.clamp(rgbs + 0.5, 0.0, 1.0)

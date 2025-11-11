@@ -586,13 +586,22 @@ class DrivingDataset(SceneDataset):
         return valid_mask
 
     def split_train_test(self):
-        if self.data_cfg.pixel_source.test_image_stride != 0:
-            test_timesteps = np.arange(
-                # it makes no sense to have test timesteps before the start timestep
-                self.data_cfg.pixel_source.test_image_stride,
-                self.num_img_timesteps,
-                self.data_cfg.pixel_source.test_image_stride,
-            )
+        """
+        Split timesteps into train/test according to stride and optional offset.
+
+        Configs used (under data.pixel_source):
+          - test_image_stride: int, if >0 enable splitting by stride (default 0 = disabled)
+          - test_image_offset: int, optional start offset in [0, stride-1] (default 0)
+        """
+        stride = int(getattr(self.data_cfg.pixel_source, "test_image_stride", 0) or 0)
+        if stride > 0:
+            # Optional offset to control whether test takes even/odd frames, etc.
+            offset = int(getattr(self.data_cfg.pixel_source, "test_image_offset", 0) or 0)
+            # Normalize offset to a valid range [0, stride-1]
+            if stride > 0:
+                offset = offset % stride
+            # Note: timesteps here are 0..num_img_timesteps-1 within the selected [start_timestep, end_timestep)
+            test_timesteps = np.arange(offset, self.num_img_timesteps, stride)
         else:
             test_timesteps = []
         train_timesteps = np.array(
