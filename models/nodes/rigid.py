@@ -17,6 +17,7 @@ class RigidNodes(VanillaGaussians):
         **kwargs
     ):
         super().__init__(**kwargs)
+        self._interp_info = None  # (idx0, idx1, alpha) for temporal interpolation in eval
         
     @property
     def num_instances(self):
@@ -29,13 +30,28 @@ class RigidNodes(VanillaGaussians):
         """
         get the mask for valid points
         """
-        return self.instances_fv[self.cur_frame][self.point_ids[..., 0]]
+        # During temporal interpolation, require visibility in both key frames to avoid
+        # single-frame popping at high FPS. Fallback to current-frame visibility otherwise.
+        if hasattr(self, "_interp_info") and self._interp_info is not None:
+            i0, i1, _ = self._interp_info
+            base_mask = self.instances_fv[i0] & self.instances_fv[i1]
+        else:
+            base_mask = self.instances_fv[self.cur_frame]
+        return base_mask[self.point_ids[..., 0]]
     
     def set_cur_frame(self, frame_id: int):
         self.cur_frame = frame_id
     def register_normalized_timestamps(self, normalized_timestamps: int):
         self.normalized_timestamps = normalized_timestamps
         
+    def set_time_interp(self, idx0: int, idx1: int, alpha: float):
+        """Optionally enable temporal interpolation between two frames at fraction alpha.
+        This is used at rendering time for higher-FPS playback.
+        """
+        self._interp_info = (max(0, min(idx0, self.num_frames - 1)),
+                             max(0, min(idx1, self.num_frames - 1)),
+                             float(max(0.0, min(1.0, alpha))))
+
     def create_from_pcd(self, instance_pts_dict: Dict[str, torch.Tensor]) -> None:
         """
         instance_pts_dict: {
@@ -319,40 +335,53 @@ class RigidNodes(VanillaGaussians):
         """
         assert means.shape[0] == self.point_ids.shape[0], \
             "its a bug here, we need to pass the mask for points_ids"
-        if self.in_test_set and (
-            self.cur_frame - 1 > 0 and self.cur_frame + 1 < self.num_frames
-        ):
-            # use the previous and next frame to interpolate the pose
-            _quats_prev_frame = self.instances_quats[self.cur_frame - 1]
-            _quats_next_frame = self.instances_quats[self.cur_frame + 1]
-            _quats_cur_frame = self.instances_quats[self.cur_frame]
-            interpolated_quats = interpolate_quats(_quats_prev_frame, _quats_next_frame)
-            
-            inter_valid_mask = self.instances_fv[self.cur_frame - 1] & self.instances_fv[self.cur_frame + 1]
-            quats_cur_frame = torch.where(
-                inter_valid_mask[:, None], interpolated_quats, _quats_cur_frame
-            )
+        # Prefer explicit interpolation if provided
+        if self._interp_info is not None:
+            i0, i1, a = self._interp_info
+            q0 = self.instances_quats[i0]
+            q1 = self.instances_quats[i1]
+            quats_cur_frame = interpolate_quats(q0.clone(), q1.clone(), fraction=a)
         else:
-            quats_cur_frame = self.instances_quats[self.cur_frame] # (num_instances, 4)
+            if self.in_test_set and (
+                self.cur_frame - 1 > 0 and self.cur_frame + 1 < self.num_frames
+            ):
+                # use the previous and next frame to interpolate the pose (midpoint)
+                _quats_prev_frame = self.instances_quats[self.cur_frame - 1]
+                _quats_next_frame = self.instances_quats[self.cur_frame + 1]
+                _quats_cur_frame = self.instances_quats[self.cur_frame]
+                interpolated_quats = interpolate_quats(_quats_prev_frame, _quats_next_frame)
+                
+                inter_valid_mask = self.instances_fv[self.cur_frame - 1] & self.instances_fv[self.cur_frame + 1]
+                quats_cur_frame = torch.where(
+                    inter_valid_mask[:, None], interpolated_quats, _quats_cur_frame
+                )
+            else:
+                quats_cur_frame = self.instances_quats[self.cur_frame] # (num_instances, 4)
         rot_cur_frame = quat_to_rotmat(
             self.quat_act(quats_cur_frame)
         )                                                          # (num_instances, 3, 3)
         rot_per_pts = rot_cur_frame[self.point_ids[..., 0]]        # (num_points, 3, 3)
         
-        if self.in_test_set and (
-            self.cur_frame - 1 > 0 and self.cur_frame + 1 < self.num_frames
-        ):
-            _prev_ins_trans = self.instances_trans[self.cur_frame - 1]
-            _next_ins_trans = self.instances_trans[self.cur_frame + 1]
-            _cur_ins_trans = self.instances_trans[self.cur_frame]
-            interpolated_trans = (_prev_ins_trans + _next_ins_trans) * 0.5
-            
-            inter_valid_mask = self.instances_fv[self.cur_frame - 1] & self.instances_fv[self.cur_frame + 1]
-            trans_cur_frame = torch.where(
-                inter_valid_mask[:, None], interpolated_trans, _cur_ins_trans
-            )
+        if self._interp_info is not None:
+            i0, i1, a = self._interp_info
+            t0 = self.instances_trans[i0]
+            t1 = self.instances_trans[i1]
+            trans_cur_frame = (1.0 - a) * t0 + a * t1
         else:
-            trans_cur_frame = self.instances_trans[self.cur_frame] # (num_instances, 3)
+            if self.in_test_set and (
+                self.cur_frame - 1 > 0 and self.cur_frame + 1 < self.num_frames
+            ):
+                _prev_ins_trans = self.instances_trans[self.cur_frame - 1]
+                _next_ins_trans = self.instances_trans[self.cur_frame + 1]
+                _cur_ins_trans = self.instances_trans[self.cur_frame]
+                interpolated_trans = (_prev_ins_trans + _next_ins_trans) * 0.5
+                
+                inter_valid_mask = self.instances_fv[self.cur_frame - 1] & self.instances_fv[self.cur_frame + 1]
+                trans_cur_frame = torch.where(
+                    inter_valid_mask[:, None], interpolated_trans, _cur_ins_trans
+                )
+            else:
+                trans_cur_frame = self.instances_trans[self.cur_frame] # (num_instances, 3)
         trans_per_pts = trans_cur_frame[self.point_ids[..., 0]]
         
         # transform the means to world space
@@ -368,7 +397,11 @@ class RigidNodes(VanillaGaussians):
         """
         assert quats.shape[0] == self.point_ids.shape[0], \
             "its a bug here, we need to pass the mask for points_ids"
-        global_quats_cur_frame = self.instances_quats[self.cur_frame]
+        if self._interp_info is not None:
+            i0, i1, a = self._interp_info
+            global_quats_cur_frame = interpolate_quats(self.instances_quats[i0].clone(), self.instances_quats[i1].clone(), fraction=a)
+        else:
+            global_quats_cur_frame = self.instances_quats[self.cur_frame]
         global_quats_per_pts = global_quats_cur_frame[self.point_ids[..., 0]]
             
         global_quats_per_pts = self.quat_act(global_quats_per_pts)

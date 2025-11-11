@@ -8,3 +8,16 @@ python datasets/tools/extract_masks.py --data_root data/v2x-real/processed_multi
 
 conda activate drivestudio
 python tools/train.py --config_file configs/omnire.yaml --output_root work_dirs --project drivestudio --run_name v2x-real-test-143453 dataset=v2xreal/12cams data.data_root=data/v2x-real/processed_multicam data.scene_idx=1
+
+
+export PYTHONPATH=$(pwd)
+start_timestep=0 # start frame index for training
+end_timestep=-1 # end frame index, -1 for the last frame
+
+python tools/train.py \
+    --config_file configs/omnire.yaml \
+    --run_name nuscenes_scene5_6cams \
+    dataset=nuscenes/6cams \
+    data.scene_idx=5 \
+    data.start_timestep=$start_timestep \
+    data.end_timestep=$end_timestep

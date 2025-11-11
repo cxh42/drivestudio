@@ -23,6 +23,7 @@ class SMPLNodes(RigidNodes):
     ):
         self.smpl_points_num = 6890
         super().__init__(**kwargs)
+        self._interp_info = None  # (idx0, idx1, alpha) for temporal interpolation in eval
         
         self.use_voxel_deformer=self.ctrl_cfg.use_voxel_deformer
         # overide here, because we use only one dimension for scale
@@ -185,6 +186,14 @@ class SMPLNodes(RigidNodes):
         reshaped_x = x.reshape(self.num_instances, self.smpl_points_num, 3)
         _, nn_ind, _ = knn_points(reshaped_x, reshaped_x, K=self.ctrl_cfg.knn_neighbors, return_nn=False)
         self.nn_ind = nn_ind
+
+    def set_time_interp(self, idx0: int, idx1: int, alpha: float):
+        """Enable temporal interpolation between two frames with fraction alpha [0,1]."""
+        self._interp_info = (
+            max(0, min(idx0, self.num_frames - 1)),
+            max(0, min(idx1, self.num_frames - 1)),
+            float(max(0.0, min(1.0, alpha)))
+        )
     
     def postprocess_per_train_step(
         self,
@@ -208,7 +217,12 @@ class SMPLNodes(RigidNodes):
         assert means.shape[0] == self.point_ids.shape[0], \
             "its a bug here, we need to pass the mask for points_ids"
         instance_mask = self.instances_fv[self.cur_frame]
-        if self.in_test_set and (
+        if self._interp_info is not None:
+            i0, i1, a = self._interp_info
+            _prev_masked_theta = torch.cat((self.instances_quats[i0], self.smpl_qauts[i0]), dim=1)[instance_mask]
+            _next_masked_theta = torch.cat((self.instances_quats[i1], self.smpl_qauts[i1]), dim=1)[instance_mask]
+            masked_theta = interpolate_quats(_prev_masked_theta, _next_masked_theta, fraction=a)
+        elif self.in_test_set and (
             self.cur_frame - 1 > 0 and self.cur_frame + 1 < self.num_frames
         ):
             _prev_masked_theta = torch.cat((self.instances_quats[self.cur_frame - 1], self.smpl_qauts[self.cur_frame - 1]), dim=1)[instance_mask]
@@ -244,7 +258,12 @@ class SMPLNodes(RigidNodes):
         means_container.index_add_(0, instance_mask.nonzero().squeeze(), deformed_means)
         means_container = means_container.reshape(-1, 3)
 
-        if self.in_test_set and (
+        if self._interp_info is not None:
+            i0, i1, a = self._interp_info
+            _prev_ins_trans = self.instances_trans[i0]
+            _next_ins_trans = self.instances_trans[i1]
+            trans_cur_frame = (1.0 - a) * _prev_ins_trans + a * _next_ins_trans
+        elif self.in_test_set and (
             self.cur_frame - 1 > 0 and self.cur_frame + 1 < self.num_frames
         ):
             _prev_ins_trans = self.instances_trans[self.cur_frame - 1]

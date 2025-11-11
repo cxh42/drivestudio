@@ -211,9 +211,13 @@ class MultiTrainer(BasicTrainer):
 
         # set current time or use temporal smoothing
         normed_time = image_infos["normed_time"].flatten()[0]
-        self.cur_frame = torch.argmin(
-            torch.abs(self.normalized_timestamps - normed_time)
-        )
+        # Compute fractional frame index to enable temporal interpolation in models
+        num_ts = self.normalized_timestamps.shape[0]
+        idx_float = torch.clamp(normed_time * (num_ts - 1), 0, num_ts - 1)
+        idx0 = torch.floor(idx_float).long()
+        idx1 = torch.clamp(idx0 + 1, max=num_ts - 1)
+        alpha = (idx_float - idx0.float()).detach()
+        self.cur_frame = idx0
         
         # for evaluation
         for model in self.models.values():
@@ -225,6 +229,13 @@ class MultiTrainer(BasicTrainer):
             model = self.models[class_name]
             if hasattr(model, 'set_cur_frame'):
                 model.set_cur_frame(self.cur_frame)
+            # optional: pass interpolation info if supported by the model
+            if hasattr(model, 'set_time_interp'):
+                try:
+                    model.set_time_interp(int(idx0.item()), int(idx1.item()), float(alpha.item()))
+                except Exception:
+                    # fall back silently if model does not accept
+                    pass
         
         # prapare data
         processed_cam = self.process_camera(
